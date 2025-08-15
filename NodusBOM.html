@@ -895,7 +895,7 @@
             addRootNode() {
                 const node = this.createNode();
                 this.nodes.push(node);
-                this.renderNode(node);
+                this.renderAll(); // Use renderAll instead of renderNode
                 this.saveState();
                 this.showToast('Ana düğüm eklendi');
             }
@@ -1060,9 +1060,46 @@
                 
                 // Event listeners
                 g.addEventListener('mousedown', (e) => this.handleNodeMouseDown(e, node));
-                g.addEventListener('dblclick', () => {
+                g.addEventListener('mouseup', (e) => {
+                    // Clear timer on mouseup to prevent drag if released quickly
+                    if (this.longPressTimer) {
+                        clearTimeout(this.longPressTimer);
+                        this.longPressTimer = null;
+                    }
+                });
+                g.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
                     this.editingNode = node;
                     this.openModal(node);
+                    this.hideContextMenu();
+                });
+                
+                // Touch events for mobile
+                g.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    const touch = e.touches[0];
+                    this.handleNodeMouseDown({
+                        clientX: touch.clientX,
+                        clientY: touch.clientY,
+                        button: 0,
+                        stopPropagation: () => {},
+                        preventDefault: () => {},
+                        target: e.target
+                    }, node);
+                });
+                
+                g.addEventListener('touchend', (e) => {
+                    e.stopPropagation();
+                    if (this.longPressTimer) {
+                        clearTimeout(this.longPressTimer);
+                        this.longPressTimer = null;
+                    }
+                });
+                
+                // Prevent default context menu
+                g.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
                 });
                 
                 this.nodesGroup.appendChild(g);
@@ -1172,28 +1209,46 @@
             }
 
             handleCanvasMouseUp(e) {
+                // Clear long press timer
+                if (this.longPressTimer) {
+                    clearTimeout(this.longPressTimer);
+                    this.longPressTimer = null;
+                }
+                
                 this.panStart = null;
                 this.canvas.classList.remove('grabbing');
                 
                 if (this.isDragging) {
                     this.isDragging = false;
-                    this.dragNode = null;
-                    this.saveState();
+                    
+                    // Remove dragging class
+                    document.querySelectorAll('.dragging').forEach(el => {
+                        el.classList.remove('dragging');
+                    });
                     
                     // Check for drop on another node
                     const target = document.elementFromPoint(e.clientX, e.clientY);
                     const targetNode = target?.closest('.node-group');
-                    if (targetNode) {
+                    if (targetNode && this.dragNode) {
                         const targetId = targetNode.getAttribute('data-node-id');
-                        if (targetId !== this.selectedNode) {
-                            this.reparentNode(this.selectedNode, targetId);
+                        if (targetId !== this.dragNode.nodeId) {
+                            this.reparentNode(this.dragNode.nodeId, targetId);
                         }
                     }
+                    
+                    this.dragNode = null;
+                    this.saveState();
                 }
             }
 
             handleNodeMouseDown(e, node) {
                 e.stopPropagation();
+                e.preventDefault();
+                
+                // Clear any existing timer
+                if (this.longPressTimer) {
+                    clearTimeout(this.longPressTimer);
+                }
                 
                 this.selectNode(node.nodeId);
                 
@@ -1204,12 +1259,14 @@
                     document.querySelector(`[data-node-id="${node.nodeId}"]`).classList.add('dragging');
                 }, 500);
                 
-                // Show context menu
-                const rect = this.canvas.getBoundingClientRect();
-                const menu = document.getElementById('contextMenu');
-                menu.style.left = e.clientX + 'px';
-                menu.style.top = e.clientY + 'px';
-                menu.classList.add('show');
+                // Show context menu on right click or normal click
+                if (e.button === 2 || e.button === 0) {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const menu = document.getElementById('contextMenu');
+                    menu.style.left = e.clientX + 'px';
+                    menu.style.top = e.clientY + 'px';
+                    menu.classList.add('show');
+                }
             }
 
             handleWheel(e) {
@@ -1264,12 +1321,14 @@
             }
 
             handleTouchEnd(e) {
-                this.handleCanvasMouseUp(e);
-                this.pinchStart = null;
-                
+                // Clear long press timer
                 if (this.longPressTimer) {
                     clearTimeout(this.longPressTimer);
+                    this.longPressTimer = null;
                 }
+                
+                this.handleCanvasMouseUp(e);
+                this.pinchStart = null;
             }
 
             getTouchDistance(touches) {
@@ -1331,20 +1390,28 @@
                 this.editingNode.unitOfMeasure = document.getElementById('unitInput').value;
                 this.editingNode.notes = document.getElementById('notesInput').value;
                 
+                // Check if there's a new image to process
                 const imageInput = document.getElementById('imageInput');
                 if (imageInput.files && imageInput.files[0]) {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         this.editingNode.partImage = e.target.result;
                         this.renderAll();
+                        this.saveState();
+                        this.showToast('Düğüm güncellendi');
                     };
                     reader.readAsDataURL(imageInput.files[0]);
+                    
+                    // Clear the file input for next use
+                    imageInput.value = '';
+                } else {
+                    // No new image, just update other fields
+                    this.renderAll();
+                    this.saveState();
+                    this.showToast('Düğüm güncellendi');
                 }
                 
-                this.renderAll();
-                this.saveState();
                 this.closeModal();
-                this.showToast('Düğüm güncellendi');
             }
 
             handleImageUpload(e) {
